@@ -310,7 +310,7 @@ extern "C" {
         buf.memory = V4L2_MEMORY_MMAP;
         enum v4l2_buf_type type;    
         /* On demand capture */
-        usleep(60000);
+        usleep(130000);
         xioctl(fd, VIDIOC_QBUF, &buf);
         xioctl(fd, VIDIOC_STREAMON, &buf.type);
         fd_set fds;

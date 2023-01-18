@@ -326,6 +326,7 @@ void *rtod_fetch_thread(void *ptr)
     else transfer_delay = .0; 
 
     printf("Transfer Delay : %.1f", transfer_delay);
+    printf("Image Waiting Time : %.1f", image_waiting_time);
     inter_frame_gap = GET_IFG(frame[buff_index].frame_sequence, frame_sequence_tmp);
 
     if(cnt >= (CYCLE_OFFSET - 5)){
