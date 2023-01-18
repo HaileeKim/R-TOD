@@ -290,7 +290,7 @@ void *rtod_fetch_thread(void *ptr)
         in_s = get_image_from_stream_letterbox(cap, net.w, net.h, net.c, &in_img, dont_close_stream);
     else{
 #ifdef V4L2
-		if(-1 == capture_image(&frame[buff_index], *fd_handler))
+		if(-1 == convert_image(&frame[buff_index], *fd_handler))
 		{
 			perror("Fail to capture image");
 			exit(0);
@@ -305,6 +305,7 @@ void *rtod_fetch_thread(void *ptr)
             //exit(EXIT_FAILURE);
             return 0;
         }
+	capture_image(&frame[buff_index], *fd_handler);
 #else
         in_s = get_image_from_stream_resize_with_timestamp(cap, net.w, net.h, net.c, &in_img, dont_close_stream, &frame[buff_index]);
         //        in_s = get_image_from_v4l2(net.w, net.h, net.c, &in_img, dont_close_stream, &frame[buff_index]);
@@ -487,7 +488,7 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     //printf("ondemand : %d\n", ondemand);
 
 #ifdef V4L2
-	if(-1 == capture_image(&frame[buff_index], *fd_handler))
+	if(-1 == capture_image_test(&frame[buff_index], *fd_handler))
 	{
 		perror("Fail to capture image");
 		exit(0);
