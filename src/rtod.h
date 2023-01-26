@@ -78,6 +78,7 @@ double b_fetch_max;
 
 double frame_timestamp[3];
 int buff_index;
+int cap_index;
 int sleep_time;
 int cnt;
 int display_index;
