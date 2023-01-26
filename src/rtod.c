@@ -278,28 +278,13 @@ int check_on_demand(void)
 
     return on_demand;
 }
-
-struct frame_data *f;
-void *rtod_capture_thread(void *ptr)
+void *rtod_queue_thread(void *ptr)
 {
-    while(1)
-    {
-#ifdef V4L2
-	//if(-1 == capture_image(&f, *fd_handler))
-	if(-1 == capture_image(&frame[buff_index], *fd_handler))
-	
-	{
-		perror("Fail to capture image");
-		exit(0);
-	}
-	//usleep(33.333*1000);
-	//printf("capture image =============");
-	sleep(50);
-    }
-#endif
-
+    
+    capture_image(&frame[cap_index], *fd_handler);
+    
+    return 0;
 }
-
 void *rtod_fetch_thread(void *ptr)
 {
     start_fetch = get_time_in_ms();
@@ -307,20 +292,17 @@ void *rtod_fetch_thread(void *ptr)
     usleep(fetch_offset * 1000);
 
     int dont_close_stream = 0;    // set 1 if your IP-camera periodically turns off and turns on video-stream
-    if(letter_box)/
+    if(letter_box)
         in_s = get_image_from_stream_letterbox(cap, net.w, net.h, net.c, &in_img, dont_close_stream);
     else{
 #ifdef V4L2
-	//frame[buff_index] = *f;
-	// if(-1 == convert_image(&frame[buff_index]))
-	// {
-	// 	perror("Fail to convert image");
-	// 	exit(0);
-	// }
-        letterbox_image_into(frame[buff_index].frame, net.w, net.h, frame[buff_index].resize_frame);
-        //frame[buff_index].resize_frame = letterbox_image(frame[buff_index].frame, net.w, net.h);
+		//capture_image(&frame[buff_index], *fd_handler);
+        
+        convert_image(&frame[buff_index]);
+        //letterbox_image_into(frame[buff_index].frame, net.w, net.h, frame[buff_index].resize_frame);
+        frame[buff_index].resize_frame = letterbox_image(frame[buff_index].frame, net.w, net.h);
         //show_image_cv(frame[buff_index].resize_frame,"im");
-
+        
         if(!frame[buff_index].resize_frame.data){
             printf("Stream closed.\n");
             flag_exit = 1;
@@ -348,14 +330,13 @@ void *rtod_fetch_thread(void *ptr)
 
     inter_frame_gap = GET_IFG(frame[buff_index].frame_sequence, frame_sequence_tmp);
 
-    if(cnt >= (CYCLE_OFFSET - 5)){
-        d_fetch = end_fetch - start_fetch;
-        b_fetch = frame[buff_index].select;
-        e_fetch = d_fetch - b_fetch - fetch_offset;
-    }
 
-    printf("image waiting time : %.1f \n", image_waiting_time);
-    printf("transfer_delay : %.1f \n", transfer_delay);
+    d_fetch = end_fetch - start_fetch;
+    b_fetch = frame[buff_index].select;
+    e_fetch = d_fetch - b_fetch - fetch_offset;
+
+
+    
     return 0;
 }
 
@@ -369,8 +350,9 @@ void *rtod_inference_thread(void *ptr)
 #else
     float *X = det_s.data;
 #endif
+    
     float *prediction = network_predict(net, X);
-
+   
     double e_i_cpu = get_time_in_ms();
 
     memcpy(predictions[demo_index], prediction, l.outputs*sizeof(float));
@@ -392,7 +374,7 @@ void *rtod_inference_thread(void *ptr)
 #endif
     end_infer = get_time_in_ms();
 
-    d_infer = end_infer - start_infer;
+    d_infer =  e_i_cpu - start_infer;
 
     return 0;
 }
@@ -492,7 +474,6 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     }
     flag_exit = 0;
 
-    pthread_t capture_thread;
     pthread_t fetch_thread;
     pthread_t inference_thread;
 
@@ -513,21 +494,14 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     //printf("ondemand : %d\n", ondemand);
 
 #ifdef V4L2
-	if(-1 == capture_image(&frame[buff_index], *fd_handler))
-	{
-		perror("Fail to capture image");
-		exit(0);
-	}
-	if(-1 == convert_image(&frame[buff_index]))
-	{
-		perror("Fail to convert image");
-		exit(0);
-	}
+	
+    capture_image_test(&frame[buff_index], *fd_handler);
     frame[0].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
-
+    
+    
     frame[1].frame = frame[0].frame;
     frame[1].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
-
+    
     frame[2].frame = frame[0].frame;
     frame[2].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
 #else
@@ -586,13 +560,15 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     while(1){
         ++count;
         {
-#if (defined ZERO_SLACK)
+
+#if (defined CONTENTION_FREE)
+            display_index = (buff_index + 2) %3;
+            cap_index = (buff_index+1) % 3;
+            detect_index = (buff_index) %3;
+#elif (defined ZERO_SLACK)
             /* Image index */
             display_index = (buff_index + 1) %3;
             detect_index = (buff_index + 2) %3;
-#elif (defined CONTENTION_FREE)
-            display_index = (buff_index + 2) %3;
-            detect_index = (buff_index) %3;
 #else
     fprintf(stderr, "ERROR: Set either ZERO_SLACK or CONTENTION_FREE in Makefile\n");
     exit(0);
@@ -600,8 +576,6 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
             const float nms = .45;    // 0.4F
             int local_nboxes = nboxes;
             detection *local_dets = dets;
-            /* Fork Capture thread */
-    	    if(pthread_create(&capture_thread, 0, rtod_capture_thread, 0)) error("Thread creation failed");
 
             /* Fork fetch thread */
             if (!benchmark) if (pthread_create(&fetch_thread, 0, rtod_fetch_thread, 0)) error("Thread creation failed");
@@ -617,8 +591,10 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
 #ifdef ZERO_SLACK
             if(measure) printf("Measuring...\n");
 #endif
+            printf("\nImage_waiting:%.1f\n", image_waiting_time);
             printf("\nFPS:%.1f \t AVG_FPS:%.1f\n", fps, avg_fps);
             printf("Objects:\n\n");
+
 
             double start_disp = get_time_in_ms();
 
@@ -712,17 +688,18 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
             pthread_join(inference_thread, 0);
 #endif
             /* Join fetch thread */
-            if (!benchmark) {
-                pthread_join(fetch_thread, 0);
-                free_image(det_s);
-            }
+
+            pthread_join(fetch_thread, 0);
+            free_image(det_s);
+
 
 #ifdef CONTENTION_FREE 
             /* Change infer image for next object detection cycle*/
             det_img = in_img;
             det_s = in_s;
-
+            pthread_create(&fetch_thread, 0, rtod_queue_thread, 0);
             rtod_inference_thread(0);
+            pthread_join(fetch_thread, 0);
 #endif
 
             if (time_limit_sec > 0 && (get_time_point() - start_time_lim)/1000000 > time_limit_sec) {
@@ -735,6 +712,7 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
             if(delay == 0){
 #ifndef V4L2
                 if(!benchmark) release_mat(&show_img);
+            
 #endif
                 show_img = det_img;
             }
